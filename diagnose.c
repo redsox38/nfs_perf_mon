@@ -205,8 +205,11 @@ void print_list(struct json_object *nodes)
   l = list_head;
 
   if (!quiet) {
-    printf("%-17s %8s %7s %8s %s\n", "Host", "Bytes", "Packets", "NFS IOPS", "Jobs");
-    printf("---------------------------------------------\n");
+    printf("%-17s %8s %7s %8s", "Host", "Bytes", "Packets", "IOPS(NFS)");
+    if (nodefile != NULL) 
+      printf(" %s", "Jobs");
+
+    printf("\n---------------------------------------------\n");
   }
 
   while(l != NULL) {
@@ -286,6 +289,11 @@ void update_list(struct in_addr ip, int size, int iop_flag)
       /* i > 0 meaning ip is greater than this address in the list
          so we insert a new element at the previous position */
       n = (diag_elt_t *)malloc(sizeof(diag_elt_t));
+      if (n == NULL) {
+        fprintf(stderr, "malloc failed\n");
+        exit(-1);
+      }
+
       n->bytes = size;
       n->count = 1;
       n->iops = 0;
@@ -307,6 +315,11 @@ void update_list(struct in_addr ip, int size, int iop_flag)
   if (!done) {
  
     n = (diag_elt_t *)malloc(sizeof(diag_elt_t));
+    if (n == NULL) {
+      fprintf(stderr, "malloc failed\n");
+      exit(-1);
+    }
+  
     n->bytes = size;
     n->addr = ip;
     n->count = 1;
@@ -334,6 +347,7 @@ void read_packet(u_char *args, const struct pcap_pkthdr *hdr,
   char                        *payload;
   struct in_addr              addr;
   int                         size_ip, size, iop = 0;
+  uint                        data_len;
 
   eth      = (struct sniff_ethernet*)(packet);
   ip       = (struct sniff_ip *)(packet + SIZE_ETHER);
@@ -353,8 +367,9 @@ void read_packet(u_char *args, const struct pcap_pkthdr *hdr,
   if (!memcmp((void *)&addr, (void *)&my_ip, sizeof(struct in_addr)))
     addr = ip->ip_dst;
 
+  data_len = ip->ip_len - (SIZE_ETHER + size_ip + size);
   /* see if this looks like it might be an rpc call */
-  if (size > 19) {
+  if (data_len > 28) {
     /* it's big enough */
     rpc = (struct sniff_rpc*)(payload + 4);
 
@@ -488,12 +503,21 @@ int main(int argc, char *argv[]) {
   /* parse node file so we can map workloads to jobs */
   if (nodefile != NULL) {
     nodefile_str = read_node_file();
+    if (nodefile_str == NULL) {
+      fprintf(stderr, "unable to read %s\n", nodefile);
+      exit(-1);
+    }
     nodes = json_tokener_parse(nodefile_str);
     free(nodefile_str);
   }
 
   list_head = (diag_elt_t *)malloc(sizeof(diag_elt_t));
 
+  if (list_head == NULL) {
+    fprintf(stderr, "malloc failed\n");
+    exit(-1);
+  }
+ 
   list_head->next = NULL;
   list_head->addr = inet_makeaddr(0, 0);
   list_head->bytes = 0;
